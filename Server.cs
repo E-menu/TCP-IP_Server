@@ -9,6 +9,16 @@ namespace Server_TCP_IP
     class Server
     {
 
+        TcpListener server = null;
+        public Server(string ip, int port)
+        {
+            IPAddress localAddr = IPAddress.Parse(ip);
+            server = new TcpListener(localAddr, port);
+            server.Start();
+            StartListener();
+        }
+
+
 
 
 
