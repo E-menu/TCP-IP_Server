@@ -29,7 +29,8 @@ namespace Server_TCP_IP
                     TcpClient client = server.AcceptTcpClient();
                     Console.WriteLine("Connected!");
                     Thread t = new Thread(new ParameterizedThreadStart(HandleDeivce));
-                    t.Start(client);
+                    t.Start(client); //Wjebac tych klientow do slownika z kluczem zarejsetrowanym nicku i tcpclient czyli de facto socket
+
                 }
             }
             catch (SocketException e)
@@ -51,29 +52,23 @@ namespace Server_TCP_IP
             try
             {
                 i = stream.Read(bytes, 0, bytes.Length);
-                client.Close();
-                    switch ((Comand_Type)bytes[0])
-                    {
-                        case Comand_Type.Register:
-                            register_user(bytes);
-                            break;
-                        case Comand_Type.SendToDesktop:
-                            send_to_desktop(bytes);
-                            break;
-                        case Comand_Type.SendToRpi:
-                            send_To_Rpi(bytes);
-                            break;
+                switch ((Comand_Type)bytes[0])
+                {
+                    case Comand_Type.Register_desktop:
+                        usersData.register_desktop(bytes, client, i);
+                        break;
+                    case Comand_Type.Register_Rpi:
+                        usersData.register_Rpi(bytes, client, i);
+                        break;
+                    case Comand_Type.SendToDesktop:
+                        send_to_desktop(bytes, i);
+                        break;
+                    case Comand_Type.SendToRpi:
+                        send_To_Rpi(bytes, i);
+                        break;
 
-                    }
-                client.Close();
-                    string hex = BitConverter.ToString(bytes);
-                    data = Encoding.ASCII.GetString(bytes, 0, i);
-                    Console.WriteLine("{1}: Received: {0}", data, Thread.CurrentThread.ManagedThreadId);
-                    string str = "Hey Device!";
-                    Byte[] reply = System.Text.Encoding.ASCII.GetBytes(str);
-                    stream.Write(reply, 0, reply.Length);
-                    Console.WriteLine("{1}: Sent: {0}", str, Thread.CurrentThread.ManagedThreadId);
-                
+                }
+             
             }
             catch (Exception e)
             {
@@ -85,47 +80,53 @@ namespace Server_TCP_IP
         }
 
 
-        private void register_user(byte[] data)
+        private void send_to_desktop(byte[] data, int i)
         {
 
-
-        }
-
-        private void send_to_desktop(byte[] data)
-        {
-
-           Packet packettosend= UsersData.MakePackettoSend(data);
-            foreach (string reciver in packettosend.recivers){
-                string ip_number = usersData.Desktop_users[reciver];
-                TcpClient client = new TcpClient();
-                client.Connect(ip_number, 13000);
-            var stream = client.GetStream();
-                stream.Write(packettosend.data, 0, packettosend.data.Length);
-                client.Close();
-
-            }
-
-        }
-        private void send_To_Rpi(byte[] data)
-        {
-            Packet packettosend = UsersData.MakePackettoSend(data);
+            Packet packettosend = UsersData.MakePackettoSend(data, i);
             foreach (string reciver in packettosend.recivers)
             {
-                string ip_number = usersData.Desktop_users[reciver];
-                TcpClient client = new TcpClient();
-                client.Connect(ip_number, 13000);
+                TcpClient client = usersData.Desktop_users[reciver];
                 var stream = client.GetStream();
                 stream.Write(packettosend.data, 0, packettosend.data.Length);
-                client.Close();
-
             }
 
         }
-    
+        private void send_To_Rpi(byte[] data, int i)
+        {
+            Packet packettosend = UsersData.MakePackettoSend(data, i);
+            foreach (string reciver in packettosend.recivers)
+            {
+                TcpClient client = usersData.Rpi_users[reciver];
+                var stream = client.GetStream();
+                stream.Write(packettosend.data, 0, packettosend.data.Length);
+            }
+
+        }
+        public bool isConnected(TcpClient tcp)
+        {
+
+            // Detect if client disconnected
+            if (tcp.Client.Poll(0, SelectMode.SelectRead))
+            {
+                byte[] buff = new byte[1];
+                if (tcp.Client.Receive(buff, SocketFlags.Peek) == 0)
+                {
+                    // Client disconnected
+                    return false;
+                }
+            }
+
+
+            return true;
+        }
+
+
+
+
+
+
+
+
     }
-
-
-
-
-
 }
