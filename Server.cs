@@ -10,6 +10,7 @@ namespace Server_TCP_IP
     {
 
         TcpListener server = null;
+        UsersData usersData = new UsersData();
         public Server(string ip, int port)
         {
             IPAddress localAddr = IPAddress.Parse(ip);
@@ -49,8 +50,22 @@ namespace Server_TCP_IP
             int i;
             try
             {
-                while ((i = stream.Read(bytes, 0, bytes.Length)) != 0)
-                {
+                i = stream.Read(bytes, 0, bytes.Length);
+                client.Close();
+                    switch ((Comand_Type)bytes[0])
+                    {
+                        case Comand_Type.Register:
+                            register_user(bytes);
+                            break;
+                        case Comand_Type.SendToDesktop:
+                            send_to_desktop(bytes);
+                            break;
+                        case Comand_Type.SendToRpi:
+                            send_To_Rpi(bytes);
+                            break;
+
+                    }
+                client.Close();
                     string hex = BitConverter.ToString(bytes);
                     data = Encoding.ASCII.GetString(bytes, 0, i);
                     Console.WriteLine("{1}: Received: {0}", data, Thread.CurrentThread.ManagedThreadId);
@@ -58,7 +73,7 @@ namespace Server_TCP_IP
                     Byte[] reply = System.Text.Encoding.ASCII.GetBytes(str);
                     stream.Write(reply, 0, reply.Length);
                     Console.WriteLine("{1}: Sent: {0}", str, Thread.CurrentThread.ManagedThreadId);
-                }
+                
             }
             catch (Exception e)
             {
@@ -68,5 +83,49 @@ namespace Server_TCP_IP
 
 
         }
+
+
+        private void register_user(byte[] data)
+        {
+
+
+        }
+
+        private void send_to_desktop(byte[] data)
+        {
+
+           Packet packettosend= UsersData.MakePackettoSend(data);
+            foreach (string reciver in packettosend.recivers){
+                string ip_number = usersData.Desktop_users[reciver];
+                TcpClient client = new TcpClient();
+                client.Connect(ip_number, 13000);
+            var stream = client.GetStream();
+                stream.Write(packettosend.data, 0, packettosend.data.Length);
+                client.Close();
+
+            }
+
+        }
+        private void send_To_Rpi(byte[] data)
+        {
+            Packet packettosend = UsersData.MakePackettoSend(data);
+            foreach (string reciver in packettosend.recivers)
+            {
+                string ip_number = usersData.Desktop_users[reciver];
+                TcpClient client = new TcpClient();
+                client.Connect(ip_number, 13000);
+                var stream = client.GetStream();
+                stream.Write(packettosend.data, 0, packettosend.data.Length);
+                client.Close();
+
+            }
+
+        }
+    
     }
+
+
+
+
+
 }
