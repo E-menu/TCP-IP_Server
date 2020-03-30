@@ -23,12 +23,14 @@ namespace Server_TCP_IP
         {
             try
             {
+                Thread Maintainer = new Thread(new ThreadStart(MaintainceUsers));
+                Maintainer.Start();
                 while (true)
                 {
                     Console.WriteLine("Waiting for a connection...");
                     TcpClient client = server.AcceptTcpClient();
                     Console.WriteLine("Connected!");
-                    Thread t = new Thread(new ParameterizedThreadStart(HandleDeivce));
+                    Thread t = new Thread(new ParameterizedThreadStart(RegisterDevice));
                     t.Start(client); //Wjebac tych klientow do slownika z kluczem zarejsetrowanym nicku i tcpclient czyli de facto socket
 
                 }
@@ -41,7 +43,7 @@ namespace Server_TCP_IP
 
         }
 
-        public void HandleDeivce(Object obj)
+        public void RegisterDevice(Object obj)
         {
             TcpClient client = (TcpClient)obj;
             var stream = client.GetStream();
@@ -60,12 +62,6 @@ namespace Server_TCP_IP
                     case Comand_Type.Register_Rpi:
                         usersData.register_Rpi(bytes, client, i);
                         break;
-                    case Comand_Type.SendToDesktop:
-                        send_to_desktop(bytes, i);
-                        break;
-                    case Comand_Type.SendToRpi:
-                        send_To_Rpi(bytes, i);
-                        break;
 
                 }
              
@@ -78,18 +74,66 @@ namespace Server_TCP_IP
 
 
         }
+        private void MaintainceUsers()
+        {
+            Byte[] bytes = new Byte[256];
+            int i = 0;
+            while (true)
+            {
+                foreach (var client in usersData.Desktop_users)
+                {
+                    lock (client.Value.sync)
+                    {
+                        var stream = client.Value.client.GetStream();
+                        if (stream.DataAvailable)
+                            i = stream.Read(bytes, 0, bytes.Length);
+                    }
+                    if (i != 0)
+                    {
+                        switch ((Comand_Type)bytes[0])
+                        {
+                            case Comand_Type.SendToDesktop:
+                                send_to_desktop(bytes, i);
+                                break;
+                            case Comand_Type.SendToRpi:
+                                send_To_Rpi(bytes, i);
+                                break;
+                        }
+                    }    
+                    
 
+                }
+
+                Thread.Sleep(500);
+
+            }
+        }
+        
 
         private void send_to_desktop(byte[] data, int i)
         {
-
-            Packet packettosend = UsersData.MakePackettoSend(data, i);
-            foreach (string reciver in packettosend.recivers)
-            {
-                TcpClient client = usersData.Desktop_users[reciver];
-                var stream = client.GetStream();
-                stream.Write(packettosend.data, 0, packettosend.data.Length);
-            }
+            
+                Packet packettosend = UsersData.MakePackettoSend(data, i);
+                foreach (string reciver in packettosend.recivers)
+                {
+                try
+                {
+                    if (!usersData.Desktop_users.ContainsKey(reciver))
+                        throw new Exception("Desktop user do not contains this nick:" + reciver);
+                    lock (usersData.Desktop_users[reciver].sync)
+                    {
+                        TcpClient client = usersData.Desktop_users[reciver].client;
+                        var stream = client.GetStream();
+                        stream.Write(packettosend.data, 0, packettosend.data.Length);
+                    }
+                }
+                catch (Exception e)
+                 {
+                     Console.WriteLine(e.Message);
+                }
+        
+                }
+            
 
         }
         private void send_To_Rpi(byte[] data, int i)
@@ -97,7 +141,7 @@ namespace Server_TCP_IP
             Packet packettosend = UsersData.MakePackettoSend(data, i);
             foreach (string reciver in packettosend.recivers)
             {
-                TcpClient client = usersData.Rpi_users[reciver];
+                TcpClient client = usersData.Rpi_users[reciver].client;
                 var stream = client.GetStream();
                 stream.Write(packettosend.data, 0, packettosend.data.Length);
             }
