@@ -8,8 +8,8 @@ namespace Server_TCP_IP
 {
     public class UsersData
     {
-        private static readonly object SyncRpi_users = new object();//Potrzebne do operacji na slowniku(kluczach) a nie wartosciach
-        private static readonly object SyncDesktop_users = new object();//Potrzebne do operacji na slowniku(kluczach) a nie wartosciach
+        public readonly object SyncRpi_users = new object();//Potrzebne do operacji na slowniku(kluczach) a nie wartosciach
+        public readonly object SyncDesktop_users = new object();//Potrzebne do operacji na slowniku(kluczach) a nie wartosciach
         public volatile Dictionary<String, SyncTCPClient> Rpi_users;
         public volatile Dictionary<String, SyncTCPClient> Desktop_users;
         const int lengthofNick=6;
@@ -35,7 +35,9 @@ namespace Server_TCP_IP
             lock(SyncDesktop_users) {
                  if (!Desktop_users.ContainsKey(Nick))
                      Desktop_users.Add(Nick, new SyncTCPClient(tcp) );
+                        
                  }
+
         }
         public void register_Rpi(byte[] bytes, TcpClient tcp, int i)
         {
@@ -58,11 +60,12 @@ namespace Server_TCP_IP
     public class SyncTCPClient
     {
         public TcpClient client;
-        public readonly object sync = new object();
+        public readonly object sync;
 
         public SyncTCPClient(TcpClient _client)
         {
             client = _client;
+            sync = new object();
         }
     }
 

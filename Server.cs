@@ -11,6 +11,16 @@ namespace Server_TCP_IP
 
         TcpListener server = null;
         UsersData usersData = new UsersData();
+        class Maintainer
+        {
+            public readonly object sync;
+            public Dictionary<string, SyncTCPClient> clients;
+            public Maintainer(Dictionary<string,SyncTCPClient> _clients, object obj)
+            {
+                clients = _clients;
+                sync = obj;
+            }
+        }
         public Server(string ip, int port)
         {
             IPAddress localAddr = IPAddress.Parse(ip);
@@ -23,8 +33,9 @@ namespace Server_TCP_IP
         {
             try
             {
-                Thread Maintainer = new Thread(new ThreadStart(MaintainceUsers));
-                Maintainer.Start();
+                Thread Maintainertask = new Thread(new ParameterizedThreadStart(MaintainceUsers));
+                Maintainer desktop_maintainer = new Maintainer(usersData.Desktop_users,usersData.SyncDesktop_users);
+                Maintainertask.Start(desktop_maintainer);
                 while (true)
                 {
                     Console.WriteLine("Waiting for a connection...");
@@ -32,7 +43,6 @@ namespace Server_TCP_IP
                     Console.WriteLine("Connected!");
                     Thread t = new Thread(new ParameterizedThreadStart(RegisterDevice));
                     t.Start(client); //Wjebac tych klientow do slownika z kluczem zarejsetrowanym nicku i tcpclient czyli de facto socket
-
                 }
             }
             catch (SocketException e)
@@ -48,7 +58,6 @@ namespace Server_TCP_IP
             TcpClient client = (TcpClient)obj;
             var stream = client.GetStream();
             string imei = String.Empty;
-            string data = null;
             Byte[] bytes = new Byte[256];
             int i;
             try
@@ -74,38 +83,66 @@ namespace Server_TCP_IP
 
 
         }
-        private void MaintainceUsers()
+        private void MaintainceUsers(object obj)
         {
-            Byte[] bytes = new Byte[256];
+            Maintainer maintainer = (Maintainer)obj;
+
+
+             object sync=maintainer.sync;
+        Dictionary<string, SyncTCPClient> clients = maintainer.clients;
+
+        Byte[] bytes = new Byte[256];
             int i = 0;
+            Dictionary<String, SyncTCPClient> usersLocalCopy;
             while (true)
             {
-                foreach (var client in usersData.Desktop_users)
+                lock (sync)
+                {//mozna uzyc immutable types, w sumie to i tak sprowadzi sie do głębokiej kopii obiektu
+                    usersLocalCopy = new Dictionary<string, SyncTCPClient>( clients);
+                }
+                foreach (var client in usersLocalCopy)
                 {
+                    while (client.Value == null)//Ponieważ semafor moze jeszcze nie istnieć np.klient wlasnie w trakcie rejestracji
+                        Thread.Sleep(5);
                     lock (client.Value.sync)
                     {
-                        var stream = client.Value.client.GetStream();
-                        if (stream.DataAvailable)
-                            i = stream.Read(bytes, 0, bytes.Length);
-                    }
-                    if (i != 0)
-                    {
-                        switch ((Comand_Type)bytes[0])
+                        try
                         {
-                            case Comand_Type.SendToDesktop:
-                                send_to_desktop(bytes, i);
-                                break;
-                            case Comand_Type.SendToRpi:
-                                send_To_Rpi(bytes, i);
-                                break;
+                            var stream = client.Value.client.GetStream();
+                            if (stream.DataAvailable)
+                                i = stream.Read(bytes, 0, bytes.Length);
+
+                            if (i != 0)
+                            {
+                                switch ((Comand_Type)bytes[0])
+                                {
+                                    case Comand_Type.SendToDesktop:
+                                        send_to_desktop(bytes, i);
+                                        break;
+                                    case Comand_Type.SendToRpi:
+                                        send_To_Rpi(bytes, i);
+                                        break;
+                                }
+                            }
                         }
-                    }    
-                    
+                        catch (System.InvalidOperationException e)
+                        {
+                            Console.WriteLine(e.Message);
+                            lock (sync)
+                            {
+                                clients.Remove(client.Key);
+                            }
+                        }
+
+                        catch (Exception e)
+                        {
+                            Console.WriteLine(e.Message);
+                        }
+                    }
+
+                    Thread.Sleep(500);
 
                 }
-
-                Thread.Sleep(500);
-
             }
         }
         
@@ -122,9 +159,8 @@ namespace Server_TCP_IP
                         throw new Exception("Desktop user do not contains this nick:" + reciver);
                     lock (usersData.Desktop_users[reciver].sync)
                     {
-                        TcpClient client = usersData.Desktop_users[reciver].client;
-                        var stream = client.GetStream();
-                        stream.Write(packettosend.data, 0, packettosend.data.Length);
+                        sendPacket(packettosend, usersData.Desktop_users[reciver].client);
+
                     }
                 }
                 catch (Exception e)
@@ -141,9 +177,7 @@ namespace Server_TCP_IP
             Packet packettosend = UsersData.MakePackettoSend(data, i);
             foreach (string reciver in packettosend.recivers)
             {
-                TcpClient client = usersData.Rpi_users[reciver].client;
-                var stream = client.GetStream();
-                stream.Write(packettosend.data, 0, packettosend.data.Length);
+                sendPacket(packettosend, usersData.Rpi_users[reciver].client);
             }
 
         }
@@ -165,7 +199,21 @@ namespace Server_TCP_IP
             return true;
         }
 
+        private void sendString(string measage, TcpClient client)
+        {
+            byte[] bytes = Encoding.ASCII.GetBytes(measage);
+            var stream = client.GetStream();
+            stream.Write(bytes, 0, bytes.Length);
 
+
+        }
+        private void sendPacket(Packet packet,TcpClient client)
+        {
+            var stream = client.GetStream();
+            stream.Write(packet.data, 0, packet.data.Length);
+
+
+        }
 
 
 
