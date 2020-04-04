@@ -19,9 +19,9 @@ namespace Server_TCP_IP
             int numberofrecivers = (int)bytes[1];
             string recivers = Encoding.ASCII.GetString(bytes, 2, numberofrecivers *lengthofNick);
             string[] reciversarray = recivers.Split('#');
-            byte[] data = new byte[i - numberofrecivers * lengthofNick-2];
-            Array.ConstrainedCopy(bytes, numberofrecivers * lengthofNick + 2, data,0, i - numberofrecivers * lengthofNick - 2);
-          
+            byte[] data = new byte[i - numberofrecivers * lengthofNick-1];
+            Array.ConstrainedCopy(bytes, numberofrecivers * lengthofNick + 2, data,1, i - numberofrecivers * lengthofNick - 2);
+            data[0] = (byte)data.Length;
 
             
             
@@ -33,9 +33,9 @@ namespace Server_TCP_IP
             Console.WriteLine( "Register"+tcp.Client.RemoteEndPoint.ToString());
             string Nick = Encoding.ASCII.GetString(bytes, 1, lengthofNick);
             lock(SyncDesktop_users) {
-                 if (!Desktop_users.ContainsKey(Nick))
-                     Desktop_users.Add(Nick, new SyncTCPClient(tcp) );
-                        
+                if (!Desktop_users.ContainsKey(Nick))
+                    Desktop_users.Add(Nick, new SyncTCPClient(tcp));
+                else throw new ArgumentException();
                  }
 
         }
@@ -47,6 +47,8 @@ namespace Server_TCP_IP
             {
                 if (!Rpi_users.ContainsKey(Nick))
                     Rpi_users.Add(Nick, new SyncTCPClient(tcp));
+                else throw new ArgumentException();
+
             }
         }
 

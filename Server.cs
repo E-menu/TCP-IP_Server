@@ -4,6 +4,8 @@ using System.Text;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
+using System.Net.NetworkInformation;
+
 namespace Server_TCP_IP
 {
     class Server
@@ -33,9 +35,12 @@ namespace Server_TCP_IP
         {
             try
             {
-                Thread Maintainertask = new Thread(new ParameterizedThreadStart(MaintainceUsers));
-                Maintainer desktop_maintainer = new Maintainer(usersData.Desktop_users,usersData.SyncDesktop_users);
-                Maintainertask.Start(desktop_maintainer);
+                Maintainer rpi_maintainer = new Maintainer(usersData.Rpi_users, usersData.SyncRpi_users);
+                Maintainer desktop_maintainer = new Maintainer(usersData.Desktop_users, usersData.SyncDesktop_users);
+                Thread MaintainerDesktoptask = new Thread(new ParameterizedThreadStart(MaintainceUsers));
+                Thread MaintainerRpitask = new Thread(new ParameterizedThreadStart(MaintainceUsers));
+                MaintainerDesktoptask.Start(desktop_maintainer);
+                MaintainerRpitask.Start(rpi_maintainer);
                 while (true)
                 {
                     Console.WriteLine("Waiting for a connection...");
@@ -60,9 +65,10 @@ namespace Server_TCP_IP
             string imei = String.Empty;
             Byte[] bytes = new Byte[256];
             int i;
+
             try
             {
-                i = stream.Read(bytes, 0, bytes.Length);
+                i = stream.Read(bytes, 0,9);
                 switch ((Comand_Type)bytes[0])
                 {
                     case Comand_Type.Register_desktop:
@@ -73,7 +79,13 @@ namespace Server_TCP_IP
                         break;
 
                 }
+                sendString("OK", client);
              
+            }
+            catch(ArgumentException e)
+            {
+                sendString("NO_OK", client);
+                Console.WriteLine(e.Message+" Attepmt to register the same nick");
             }
             catch (Exception e)
             {
@@ -86,19 +98,15 @@ namespace Server_TCP_IP
         private void MaintainceUsers(object obj)
         {
             Maintainer maintainer = (Maintainer)obj;
-
-
-             object sync=maintainer.sync;
-        Dictionary<string, SyncTCPClient> clients = maintainer.clients;
-
+            byte[] lengthOfMessage = new byte[1];
+            object sync=maintainer.sync;
         Byte[] bytes = new Byte[256];
-            int i = 0;
             Dictionary<String, SyncTCPClient> usersLocalCopy;
             while (true)
             {
                 lock (sync)
                 {//mozna uzyc immutable types, w sumie to i tak sprowadzi sie do głębokiej kopii obiektu
-                    usersLocalCopy = new Dictionary<string, SyncTCPClient>( clients);
+                    usersLocalCopy = new Dictionary<string, SyncTCPClient>(maintainer.clients);
                 }
                 foreach (var client in usersLocalCopy)
                 {
@@ -109,45 +117,63 @@ namespace Server_TCP_IP
                         try
                         {
                             var stream = client.Value.client.GetStream();
-                            if (stream.DataAvailable)
-                                i = stream.Read(bytes, 0, bytes.Length);
-
-                            if (i != 0)
-                            {
-                                switch ((Comand_Type)bytes[0])
-                                {
-                                    case Comand_Type.SendToDesktop:
-                                        send_to_desktop(bytes, i);
-                                        break;
-                                    case Comand_Type.SendToRpi:
-                                        send_To_Rpi(bytes, i);
-                                        break;
-                                }
+                            stream.Read(lengthOfMessage, 0, 1);
+                            if (lengthOfMessage[0] != 0)
+                            {   
+                                    int i = stream.Read(bytes, 0, (int)lengthOfMessage[0]);
+                                    switch ((Comand_Type)bytes[0])
+                                    {
+                                        case Comand_Type.SendToDesktop:
+                                            send_to_desktop(bytes, i, client.Value.client);
+                                            break;
+                                        case Comand_Type.SendToRpi:
+                                            send_To_Rpi(bytes, i, client.Value.client);
+                                            break;
+                                        default:
+                                            throw new FormatException("Wrong command");
+                                    }
+                                    sendString("OK", client.Value.client); /// Gdy komenda przreszła bez problemów
                             }
+                        }
+                        #region Catch
+                        catch (System.IO.IOException e)
+                        {
+                            Console.WriteLine(e.Message);
+                            lock (sync) { maintainer.clients.Remove(client.Key); }
+                        }
+
+                        catch (System.ObjectDisposedException e)
+                        { 
+                            Console.WriteLine(e.Message);
+                            lock (sync) { maintainer.clients.Remove(client.Key); }
                         }
                         catch (System.InvalidOperationException e)
                         {
                             Console.WriteLine(e.Message);
-                            lock (sync)
-                            {
-                                clients.Remove(client.Key);
-                            }
+                            lock (sync) { maintainer.clients.Remove(client.Key); }
                         }
-
+                        catch (FormatException e)
+                        {
+                            Console.WriteLine(e.Message+client.Key);
+                            sendString(e.Message,client.Value.client);
+                        }
                         catch (Exception e)
                         {
                             Console.WriteLine(e.Message);
                         }
+                        #endregion
                     }
-
-                    Thread.Sleep(500);
-
                 }
+                Thread.Sleep(100);
             }
         }
         
-
-        private void send_to_desktop(byte[] data, int i)
+        /// <summary>
+        /// Jeżeli ktoregoś z odbiorców nie bedzie to wysylanie do nastepnych tez nie zostanie zrealizowane. Trzeba miec to na uwadze w aplikacji klienckiej
+        /// </summary>
+        /// <param name="data"></param>
+        /// <param name="i"></param>
+        private void send_to_desktop(byte[] data, int i,TcpClient sender)
         {
             
                 Packet packettosend = UsersData.MakePackettoSend(data, i);
@@ -156,47 +182,106 @@ namespace Server_TCP_IP
                 try
                 {
                     if (!usersData.Desktop_users.ContainsKey(reciver))
-                        throw new Exception("Desktop user do not contains this nick:" + reciver);
+                        throw new ArgumentException("Desktop_user_list do not contains this nick:" + reciver);
                     lock (usersData.Desktop_users[reciver].sync)
                     {
                         sendPacket(packettosend, usersData.Desktop_users[reciver].client);
 
                     }
                 }
+                #region Catch
+                catch (System.IO.IOException e)
+                {
+                    Console.WriteLine(e.Message);
+                    lock (usersData.SyncDesktop_users) { usersData.Desktop_users.Remove(reciver); }
+                    sendString("Lost conenction with " + reciver, sender);
+                }
+
+                catch (System.ObjectDisposedException e)
+                {
+                    Console.WriteLine(e.Message);
+                    lock (usersData.SyncDesktop_users) { usersData.Desktop_users.Remove(reciver); }
+                    sendString("Lost conenction with " + reciver, sender);
+                }
+                catch (System.InvalidOperationException e)
+                {
+                    Console.WriteLine(e.Message);
+                    lock (usersData.SyncDesktop_users) { usersData.Desktop_users.Remove(reciver); }
+                    sendString("Lost conenction with " + reciver, sender);
+                }
+                catch (ArgumentException e)
+                {
+                    Console.WriteLine(e.Message);
+                    sendString(e.Message, sender);
+                }
                 catch (Exception e)
-                 {
-                     Console.WriteLine(e.Message);
+                {
+                    Console.WriteLine(e.Message);
                 }
-        
-                }
+                #endregion
+
+            }
             
 
         }
-        private void send_To_Rpi(byte[] data, int i)
+        private void send_To_Rpi(byte[] data, int i,TcpClient sender)
         {
             Packet packettosend = UsersData.MakePackettoSend(data, i);
             foreach (string reciver in packettosend.recivers)
             {
-                sendPacket(packettosend, usersData.Rpi_users[reciver].client);
+                try
+                {
+                    if (!usersData.Rpi_users.ContainsKey(reciver))
+                        throw new ArgumentException("Rpi_user_list do not contains this nick:" + reciver);
+                    lock (usersData.Rpi_users[reciver].sync)
+                    {
+                        sendPacket(packettosend, usersData.Rpi_users[reciver].client);
+                    }
+                }
+                #region Catch
+                catch (System.IO.IOException e)
+                {
+                    Console.WriteLine(e.Message);
+                    lock (usersData.SyncRpi_users) { usersData.Rpi_users.Remove(reciver); }
+                    sendString("Lost conenction with " + reciver, sender);
+                }
+
+                catch (System.ObjectDisposedException e)
+                {
+                    Console.WriteLine(e.Message);
+                    lock (usersData.SyncRpi_users) { usersData.Rpi_users.Remove(reciver); }
+                    sendString("Lost conenction with " + reciver, sender);
+                }
+                catch (System.InvalidOperationException e)
+                {
+                    Console.WriteLine(e.Message);
+                    lock (usersData.SyncRpi_users) { usersData.Rpi_users.Remove(reciver); }
+                    sendString("Lost conenction with " + reciver, sender);
+                }
+                catch (ArgumentException e)
+                {
+                    Console.WriteLine(e.Message);
+                    sendString(e.Message, sender);
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e.Message);
+                }
+#endregion
+
             }
 
         }
-        public bool isConnected(TcpClient tcp)
+        public bool isConnected(TcpClient s)
         {
-
-            // Detect if client disconnected
-            if (tcp.Client.Poll(0, SelectMode.SelectRead))
             {
-                byte[] buff = new byte[1];
-                if (tcp.Client.Receive(buff, SocketFlags.Peek) == 0)
-                {
-                    // Client disconnected
+                bool part1 = s.Client.Poll(1, SelectMode.SelectRead);
+                bool part2 = (s.Available == 0);
+                if (part1 && part2)
                     return false;
-                }
+                else
+                    return true;
             }
-
-
-            return true;
         }
 
         private void sendString(string measage, TcpClient client)
