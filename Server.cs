@@ -111,15 +111,17 @@ namespace Server_TCP_IP
                 foreach (var client in usersLocalCopy)
                 {
                     while (client.Value == null)//Ponieważ semafor moze jeszcze nie istnieć np.klient wlasnie w trakcie rejestracji
-                        Thread.Sleep(5);
+                        Thread.Sleep(50);
                     lock (client.Value.sync)
                     {
                         try
                         {
                             var stream = client.Value.client.GetStream();
-                            stream.Read(lengthOfMessage, 0, 1);
-                            if (lengthOfMessage[0] != 0)
-                            {   
+                            if (client.Value.client.Available>0)
+                            {
+                                stream.Read(lengthOfMessage, 0, 1);
+                                if (lengthOfMessage[0] != 0)
+                                {
                                     int i = stream.Read(bytes, 0, (int)lengthOfMessage[0]);
                                     switch ((Comand_Type)bytes[0])
                                     {
@@ -132,7 +134,9 @@ namespace Server_TCP_IP
                                         default:
                                             throw new FormatException("Wrong command");
                                     }
+                                    stream.FlushAsync();
                                     sendString("OK", client.Value.client); /// Gdy komenda przreszła bez problemów
+                                }
                             }
                         }
                         #region Catch
@@ -163,6 +167,7 @@ namespace Server_TCP_IP
                         }
                         #endregion
                     }
+                    Thread.Sleep(230);
                 }
                 Thread.Sleep(100);
             }
