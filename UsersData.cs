@@ -8,9 +8,10 @@ namespace Server_TCP_IP
 {
     public class UsersData
     {
-        //Nick-IP
-        public Dictionary<String, TcpClient> Rpi_users;
-        public Dictionary<String, TcpClient> Desktop_users;
+        public readonly object SyncRpi_users = new object();//Potrzebne do operacji na slowniku(kluczach) a nie wartosciach
+        public readonly object SyncDesktop_users = new object();//Potrzebne do operacji na slowniku(kluczach) a nie wartosciach
+        public volatile Dictionary<String, SyncTCPClient> Rpi_users;
+        public volatile Dictionary<String, SyncTCPClient> Desktop_users;
         const int lengthofNick=6;
         public static Packet MakePackettoSend(byte[] bytes,int i)
         {
@@ -18,34 +19,97 @@ namespace Server_TCP_IP
             int numberofrecivers = (int)bytes[1];
             string recivers = Encoding.ASCII.GetString(bytes, 2, numberofrecivers *lengthofNick);
             string[] reciversarray = recivers.Split('#');
-            byte[] data = new byte[i - numberofrecivers * lengthofNick-2];
-            Array.ConstrainedCopy(bytes, number ofrecivers * lengthofNick + 2, data,0, i - numberofrecivers * lengthofNick - 2);
+            byte[] data = new byte[i - numberofrecivers * lengthofNick-1];
+            Array.ConstrainedCopy(bytes, numberofrecivers * lengthofNick + 2, data,1, i - numberofrecivers * lengthofNick - 2);
+            data[0] = (byte)(data.Length-1);
+
+            
+            
             return new Packet(reciversarray,data);
         }
 
-        public void register_desktop(byte[] bytes,TcpClient tcp, int i)
+        public void register_desktop(byte[] bytes, TcpClient tcp, int i)
         {
-            Console.WriteLine(tcp.Client.RemoteEndPoint.ToString());
+            Console.WriteLine( "Register"+tcp.Client.RemoteEndPoint.ToString());
             string Nick = Encoding.ASCII.GetString(bytes, 1, lengthofNick);
-            Desktop_users.Add(Nick, tcp);
-            /// Tylko do testu
-            TcpClient test = Desktop_users[Nick];
-            var stream= test.GetStream();
-            string str = "Hey Device!";
-               Byte[] reply = System.Text.Encoding.ASCII.GetBytes(str);
-               stream.Write(reply, 0, reply.Length);
+            lock(SyncDesktop_users) {
+                if (!Desktop_users.ContainsKey(Nick))
+                    Desktop_users.Add(Nick, new SyncTCPClient(tcp));
+                else {
+                    try
+                    {
+                        lock (Desktop_users[Nick].sync)
+                        { //ping procedure
+                            var stream = Desktop_users[Nick].client.GetStream();
+                            Byte[] dummy = new Byte[1];
+                            dummy[0] = 0;
+                            stream.Write(dummy, 0,1);
+                        }
+
+                    }
+
+                    catch (Exception e)
+                    {
+                        Console.WriteLine(e.Message+ "Registered once again Nick: "+Nick);
+                        Desktop_users.Remove(Nick);
+                        Desktop_users.Add(Nick, new SyncTCPClient(tcp));// Asigned once again
+                    }
+
+                }
+
+
+
+
+            }
+
         }
         public void register_Rpi(byte[] bytes, TcpClient tcp, int i)
         {
+            Console.WriteLine("Register" + tcp.Client.RemoteEndPoint.ToString());
             string Nick = Encoding.ASCII.GetString(bytes, 1, lengthofNick);
-            Rpi_users.Add(Nick, tcp);
-        }
+            lock (SyncRpi_users)
+            {
+                if (!Rpi_users.ContainsKey(Nick))
+                    Rpi_users.Add(Nick, new SyncTCPClient(tcp));
+                else
+                {
+                    try
+                    {
+                        lock (Rpi_users[Nick].sync)
+                        { //ping procedure
+                            var stream = Rpi_users[Nick].client.GetStream();
+                            Byte[] dummy = new Byte[1];
+                            dummy[0] = 0;
+                            stream.Write(dummy, 0, 1);
+                        }
 
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine(e.Message + "Registered once again Nick: " + Nick);
+                        Rpi_users.Remove(Nick);
+                        Rpi_users.Add(Nick, new SyncTCPClient(tcp));// Asigned once again
+                    }
+
+                }
+            }
+        }
 
         public UsersData()
         {
-            Desktop_users = new Dictionary<string, TcpClient>();
-            Rpi_users = new Dictionary<string, TcpClient>();
+            Desktop_users = new Dictionary<string, SyncTCPClient>();
+            Rpi_users = new Dictionary<string, SyncTCPClient>();
+        }
+    }
+    public class SyncTCPClient
+    {
+        public TcpClient client;
+        public readonly object sync;
+
+        public SyncTCPClient(TcpClient _client)
+        {
+            client = _client;
+            sync = new object();
         }
     }
 
